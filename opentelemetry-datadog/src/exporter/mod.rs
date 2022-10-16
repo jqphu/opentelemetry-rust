@@ -38,6 +38,7 @@ pub struct DatadogExporter {
     request_url: Uri,
     model_config: ModelConfig,
     version: ApiVersion,
+    events_logged: bool,
 
     resource_mapping: Option<FieldMapping>,
     name_mapping: Option<FieldMapping>,
@@ -49,6 +50,7 @@ impl DatadogExporter {
         model_config: ModelConfig,
         request_url: Uri,
         version: ApiVersion,
+        events_logged: bool,
         client: Arc<dyn HttpClient>,
         resource_mapping: Option<FieldMapping>,
         name_mapping: Option<FieldMapping>,
@@ -59,6 +61,7 @@ impl DatadogExporter {
             request_url,
             model_config,
             version,
+            events_logged,
             resource_mapping,
             name_mapping,
             service_name_mapping,
@@ -67,6 +70,37 @@ impl DatadogExporter {
 
     fn build_request(&self, batch: Vec<SpanData>) -> Result<http::Request<Vec<u8>>, TraceError> {
         let traces: Vec<Vec<SpanData>> = group_into_traces(batch);
+
+        if self.events_logged {
+            // TODO(jqphu): benchmark this.
+            for trace in &traces {
+                for span in trace {
+                    let mut map_to_log = std::collections::HashMap::<String, String>::new();
+                    let trace_id = span.span_context.trace_id().to_string();
+                    let span_id = span.span_context.span_id().to_string();
+                    map_to_log.insert("trace_id".to_string(), trace_id);
+                    map_to_log.insert("span_id".to_string(), span_id);
+
+                    for event in span.events.iter() {
+                        let mut single_event_map_to_log = map_to_log.clone();
+                        single_event_map_to_log
+                            .insert("message".to_string(), event.name.to_string());
+                        for attribute in event.attributes.iter() {
+                            single_event_map_to_log.insert(
+                                attribute.key.as_str().to_string(),
+                                attribute.value.as_str().to_string(),
+                            );
+                        }
+
+                        // TODO(jqphu): handle error don't unwrap.
+                        println!(
+                            "{}",
+                            serde_json::to_string(&single_event_map_to_log).unwrap()
+                        );
+                    }
+                }
+            }
+        }
         let trace_count = traces.len();
         let data = self.version.encode(
             &self.model_config,
@@ -93,6 +127,7 @@ impl Debug for DatadogExporter {
             .field("model_config", &self.model_config)
             .field("request_url", &self.request_url)
             .field("version", &self.version)
+            .field("events_logged", &self.events_logged)
             .field("client", &self.client)
             .field("resource_mapping", &mapping_debug(&self.resource_mapping))
             .field("name_mapping", &mapping_debug(&self.name_mapping))
@@ -115,6 +150,7 @@ pub struct DatadogPipelineBuilder {
     agent_endpoint: String,
     trace_config: Option<sdk::trace::Config>,
     version: ApiVersion,
+    events_logged: bool,
     client: Option<Arc<dyn HttpClient>>,
     resource_mapping: Option<FieldMapping>,
     name_mapping: Option<FieldMapping>,
@@ -131,6 +167,7 @@ impl Default for DatadogPipelineBuilder {
             name_mapping: None,
             service_name_mapping: None,
             version: ApiVersion::Version05,
+            events_logged: false,
             #[cfg(all(
                 not(feature = "reqwest-client"),
                 not(feature = "reqwest-blocking-client"),
@@ -161,6 +198,7 @@ impl Debug for DatadogPipelineBuilder {
             .field("service_name", &self.service_name)
             .field("agent_endpoint", &self.agent_endpoint)
             .field("version", &self.version)
+            .field("events_logged", &self.events_logged)
             .field("trace_config", &self.trace_config)
             .field("client", &self.client)
             .field("resource_mapping", &mapping_debug(&self.resource_mapping))
@@ -250,6 +288,7 @@ impl DatadogPipelineBuilder {
                 model_config,
                 Self::build_endpoint(&self.agent_endpoint, self.version.path())?,
                 self.version,
+                self.events_logged,
                 client,
                 self.resource_mapping,
                 self.name_mapping,
@@ -331,6 +370,12 @@ impl DatadogPipelineBuilder {
     /// Set version of Datadog trace ingestion API
     pub fn with_version(mut self, version: ApiVersion) -> Self {
         self.version = version;
+        self
+    }
+
+    /// Set whether to log events of Datadog trace ingestion API
+    pub fn with_events_logged(mut self, events_logged: bool) -> Self {
+        self.events_logged = events_logged;
         self
     }
 
