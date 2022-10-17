@@ -86,10 +86,21 @@ impl DatadogExporter {
                     map_to_log.insert("dd.trace_id".to_string(), trace_id);
                     map_to_log.insert("dd.span_id".to_string(), span_id);
 
+                    // Propagate trace fields all the way down.
+                    for attribute in span.attributes.iter() {
+                        map_to_log.insert(
+                            attribute.0.as_str().to_string(),
+                            attribute.1.as_str().to_string(),
+                        );
+                    }
+
                     for event in span.events.iter() {
                         let mut single_event_map_to_log = map_to_log.clone();
                         single_event_map_to_log
                             .insert("message".to_string(), event.name.to_string());
+
+                        // Take the event attributes, this will override the span attributes like
+                        // code.filepath.
                         for attribute in event.attributes.iter() {
                             single_event_map_to_log.insert(
                                 attribute.key.as_str().to_string(),
