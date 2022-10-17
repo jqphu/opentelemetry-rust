@@ -76,10 +76,15 @@ impl DatadogExporter {
             for trace in &traces {
                 for span in trace {
                     let mut map_to_log = std::collections::HashMap::<String, String>::new();
-                    let trace_id = span.span_context.trace_id().to_string();
-                    let span_id = span.span_context.span_id().to_string();
-                    map_to_log.insert("trace_id".to_string(), trace_id);
-                    map_to_log.insert("span_id".to_string(), span_id);
+                    // Convert from OpenTelemetry format to Datadog Format https://docs.datadoghq.com/tracing/other_telemetry/connect_logs_and_traces/opentelemetry/?tab=python
+                    let trace_id = (u128::from_be_bytes(span.span_context.trace_id().to_bytes())
+                        as u64)
+                        .to_string();
+                    let span_id =
+                        u64::from_be_bytes(span.span_context.span_id().to_bytes()).to_string();
+                    // Associate with datadog.
+                    map_to_log.insert("dd.trace_id".to_string(), trace_id);
+                    map_to_log.insert("dd.span_id".to_string(), span_id);
 
                     for event in span.events.iter() {
                         let mut single_event_map_to_log = map_to_log.clone();
