@@ -115,7 +115,11 @@ impl DatadogExporter {
                         // Take the event attributes, this will override the span attributes like
                         // code.filepath.
                         for attribute in event.attributes.iter() {
-                            add_kv(&attribute.key, &attribute.value, &mut map_to_log);
+                            add_kv(
+                                &attribute.key,
+                                &attribute.value,
+                                &mut single_event_map_to_log,
+                            );
                         }
 
                         println!(
