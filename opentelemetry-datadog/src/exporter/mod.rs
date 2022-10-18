@@ -69,13 +69,14 @@ impl DatadogExporter {
     }
 
     fn build_request(&self, batch: Vec<SpanData>) -> Result<http::Request<Vec<u8>>, TraceError> {
+        use serde_json::Value;
         let traces: Vec<Vec<SpanData>> = group_into_traces(batch);
 
         if self.events_logged {
             // TODO(jqphu): benchmark this.
             for trace in &traces {
                 for span in trace {
-                    let mut map_to_log = std::collections::HashMap::<String, String>::new();
+                    let mut map_to_log = serde_json::Map::<String, serde_json::Value>::new();
                     // Convert from OpenTelemetry format to Datadog Format https://docs.datadoghq.com/tracing/other_telemetry/connect_logs_and_traces/opentelemetry/?tab=python
                     let trace_id = (u128::from_be_bytes(span.span_context.trace_id().to_bytes())
                         as u64)
@@ -83,32 +84,40 @@ impl DatadogExporter {
                     let span_id =
                         u64::from_be_bytes(span.span_context.span_id().to_bytes()).to_string();
                     // Associate with datadog.
-                    map_to_log.insert("dd.trace_id".to_string(), trace_id);
-                    map_to_log.insert("dd.span_id".to_string(), span_id);
+                    map_to_log.insert("dd.trace_id".to_string(), Value::String(trace_id));
+                    map_to_log.insert("dd.span_id".to_string(), Value::String(span_id));
+
+                    let add_kv = |key: &opentelemetry::Key,
+                                         value: &opentelemetry::Value,
+                                         map: &mut serde_json::Map<
+                        String,
+                        serde_json::Value,
+                    >| {
+                        let key = key.as_str().to_string();
+                        match serde_json::from_str::<serde_json::Value>(&value.as_str()) {
+                            Ok(json) => map.insert(key, json),
+                            Err(_) => {
+                                map.insert(key, Value::String(value.as_str().to_string()))
+                            }
+                        };
+                    };
 
                     // Propagate trace fields all the way down.
                     for attribute in span.attributes.iter() {
-                        map_to_log.insert(
-                            attribute.0.as_str().to_string(),
-                            attribute.1.as_str().to_string(),
-                        );
+                        add_kv(attribute.0, attribute.1, &mut map_to_log);
                     }
 
                     for event in span.events.iter() {
                         let mut single_event_map_to_log = map_to_log.clone();
                         single_event_map_to_log
-                            .insert("message".to_string(), event.name.to_string());
+                            .insert("message".to_string(), Value::String(event.name.to_string()));
 
                         // Take the event attributes, this will override the span attributes like
                         // code.filepath.
                         for attribute in event.attributes.iter() {
-                            single_event_map_to_log.insert(
-                                attribute.key.as_str().to_string(),
-                                attribute.value.as_str().to_string(),
-                            );
+                            add_kv(&attribute.key, &attribute.value, &mut map_to_log);
                         }
 
-                        // TODO(jqphu): handle error don't unwrap.
                         println!(
                             "{}",
                             serde_json::to_string(&single_event_map_to_log).unwrap()
