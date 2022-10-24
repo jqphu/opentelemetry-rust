@@ -87,6 +87,13 @@ impl DatadogExporter {
                     map_to_log.insert("dd.trace_id".to_string(), Value::String(trace_id));
                     map_to_log.insert("dd.span_id".to_string(), Value::String(span_id));
 
+                    // Add the span resource attributes.
+                    //
+                    // This is for the env and version field.
+                    for (key, value) in span.resource.iter() {
+                        map_to_log.insert(key.to_string(), Value::String(value.to_string()));
+                    }
+
                     let add_kv = |key: &opentelemetry::Key,
                                          value: &opentelemetry::Value,
                                          map: &mut serde_json::Map<
